@@ -1,0 +1,21 @@
+# Cloudflare（wrangler）的本機檔案
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+/_worker.js
+/_routes.json
+/functions
+node_modules
+.git
+.DS_Store
+.npmrc
+
+# 只上傳遊戲本身（index.html、styles.css、src/、README.md）
+.claude
+.gitignore
+.assetsignore
+wrangler.jsonc
+serve.ps1
+start.cmd

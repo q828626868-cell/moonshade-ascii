@@ -1,0 +1,372 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #06070a;
+  color: #c8ccd4;
+  font-family: Consolas, 'DejaVu Sans Mono', Menlo, monospace;
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#dev-panel {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  background: rgba(6, 7, 10, 0.82);
+  border: 1px solid #2a2f38;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#dev-panel pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #9fb4c8;
+  white-space: pre;
+}
+
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #8b97a6;
+  background: rgba(6, 7, 10, 0.7);
+  border: 1px solid #222731;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 1.2s;
+}
+
+#legend {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: #7f8b99;
+  background: rgba(6, 7, 10, 0.7);
+  border: 1px solid #222731;
+  pointer-events: none;
+}
+
+#outfit-menu {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #c8ccd4;
+  background: rgba(6, 7, 10, 0.88);
+  border: 1px solid #2a2f38;
+  z-index: 15;
+}
+
+#outfit-menu .title {
+  margin-bottom: 8px;
+  color: #8f9bb0;
+}
+
+#outfit-menu .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+#outfit-menu button {
+  font: inherit;
+  color: #dfe6f2;
+  background: #12151b;
+  border: 1px solid var(--swatch, #444);
+  border-left: 10px solid var(--swatch, #444);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+#outfit-menu button.active {
+  outline: 1px solid #dfe6f2;
+}
+
+/* 互動提示：畫面上方正中（不擋住畫面中央的人物與馬） */
+#prompt {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 14px;
+  color: #ffd27a;
+  background: rgba(6, 7, 10, 0.75);
+  border: 1px solid #3a3326;
+  pointer-events: none;
+}
+
+#region-banner {
+  position: fixed;
+  top: 14%;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.4s, transform 1.4s;
+  color: #dfe6f2;
+  text-shadow: 0 0 12px rgba(6, 7, 10, 0.9);
+}
+
+#region-banner.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+#region-banner .name {
+  font-size: 28px;
+  letter-spacing: 0.4em;
+  padding-left: 0.4em;
+}
+
+#region-banner .subtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  color: #8f9bb0;
+}
+
+#hint.fade {
+  opacity: 0;
+}
+
+#fatal {
+  position: fixed;
+  inset: 16px;
+  margin: 0;
+  color: #e07a6e;
+  white-space: pre-wrap;
+  z-index: 20;
+}
+
+/* 耐力條：提示下方（畫面上方正中）；馬累了時變紅 */
+#stamina {
+  position: fixed;
+  left: 50%;
+  top: 44px;
+  width: 160px;
+  height: 5px;
+  transform: translateX(-50%);
+  background: rgba(6, 7, 10, 0.75);
+  border: 1px solid #3a3326;
+  pointer-events: none;
+}
+#stamina > div {
+  height: 100%;
+  width: 100%;
+  background: #c9a45c;
+}
+#stamina.tired > div {
+  background: #a3473b;
+}
+#stamina[hidden] {
+  display: none;
+}
+
+/* ---- 戰鬥：血量、技能、目標、傷害數字（ui/combatHud.js）---- */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  font-size: 12px;
+}
+#hud-hp {
+  position: absolute;
+  left: 12px;
+  bottom: 52px;
+  width: 220px;
+  padding: 5px 8px;
+  background: rgba(6, 7, 10, 0.72);
+  border: 1px solid #2a2f38;
+}
+#hud-hp .label,
+#hud-target .name {
+  color: #dfe6f2;
+  margin-bottom: 3px;
+}
+#hud-hp .bar,
+#hud-target .bar {
+  height: 6px;
+  background: #1a1d24;
+  border: 1px solid #333a46;
+}
+#hud-hp .bar > div {
+  height: 100%;
+  background: #6fbf73;
+  transition: width 0.15s;
+}
+#hud-hp .bar > div.low {
+  background: #d0584a;
+}
+#hud-hp .status {
+  min-height: 14px;
+  margin-top: 3px;
+  color: #c9a45c;
+}
+#hud-skills {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 4px;
+}
+#hud-skills .slot {
+  position: relative;
+  width: 46px;
+  height: 32px;
+  overflow: hidden;
+  background: rgba(6, 7, 10, 0.75);
+  border: 1px solid #2a2f38;
+  text-align: center;
+  color: #8b97a6;
+}
+#hud-skills .slot.ready {
+  color: #dfe6f2;
+}
+#hud-skills .slot.fire.ready { border-color: #b8623a; }
+#hud-skills .slot.thunder.ready { border-color: #c9b54a; }
+#hud-skills .slot.ice.ready { border-color: #6a9fc9; }
+#hud-skills .slot.wind.ready { border-color: #6fb59a; }
+#hud-skills .slot.flash {
+  background: rgba(255, 240, 200, 0.25);
+}
+#hud-skills .key {
+  display: block;
+  font-size: 10px;
+  color: #ffd27a;
+}
+#hud-skills .cd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(6, 7, 10, 0.7);
+}
+#hud-target {
+  position: absolute;
+  left: 50%;
+  top: 58px;
+  width: 260px;
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  text-align: center;
+  background: rgba(6, 7, 10, 0.72);
+  border: 1px solid #3a2a2a;
+}
+#hud-target.elite {
+  border-color: #8a6a3a;
+}
+#hud-target.boss {
+  width: 420px;
+  border-color: #6a8ab0;
+}
+#hud-target .bar > div {
+  height: 100%;
+  background: #c4483c;
+}
+#hud-target.boss .bar {
+  height: 9px;
+}
+#hud-target .info {
+  margin-top: 3px;
+  color: #8f9bb0;
+}
+#hud-target[hidden],
+#hud-down[hidden] {
+  display: none;
+}
+#hud-clock {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px 8px;
+  color: #9fb4c8;
+  background: rgba(6, 7, 10, 0.7);
+  border: 1px solid #222731;
+}
+#hud-hurt {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  box-shadow: inset 0 0 120px 30px rgba(200, 30, 20, 0.75);
+}
+#hud-down {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  font-size: 30px;
+  letter-spacing: 0.3em;
+  color: #e07a6e;
+  text-shadow: 0 0 14px #000;
+}
+#hud-log {
+  position: absolute;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  text-align: center;
+  color: #dfe6f2;
+  text-shadow: 0 0 8px #000;
+}
+#hud-log > div {
+  transition: opacity 1.2s;
+}
+#hud-log > div.fade {
+  opacity: 0;
+}
+.hud-number {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 15px;
+  font-weight: bold;
+  color: #f2f2f2;
+  text-shadow: 0 0 4px #000, 0 0 2px #000;
+  white-space: nowrap;
+}
+.hud-number.weak {
+  font-size: 19px;
+  color: #ffd23a;
+}
+.hud-number.resist {
+  color: #8a94a3;
+  font-size: 13px;
+}
+.hud-number.immune {
+  color: #8a94a3;
+  font-size: 13px;
+}
+.hud-number.fire { color: #ff9a4a; }
+.hud-number.weak.fire { color: #ffc34a; }
+.hud-number.ice { color: #a8dcff; }
+.hud-number.thunder { color: #fff08a; }
+.hud-number.wind { color: #b8f0d8; }

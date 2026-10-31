@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>月影那地</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <pre id="fatal" hidden></pre>
+    <script>
+      function showFatal(msg) {
+        var el = document.getElementById('fatal');
+        el.hidden = false;
+        el.textContent += msg + '\n';
+      }
+      window.addEventListener('error', function (e) { showFatal(e.message || String(e)); });
+      window.addEventListener('unhandledrejection', function (e) { showFatal(String(e.reason)); });
+    </script>
+    <script type="module" src="src/main.js" onerror="showFatal('無法載入 src/main.js（需要以 http:// 開啟，見 README）')"></script>
+  </body>
+</html>

@@ -1,4 +1,5 @@
 // 第三人稱鏡頭。yaw = 0 時鏡頭在目標 +Z 方向，往 -Z 看。
+//   瞄準（setAim）：右鍵按住時拉近、看向右肩外一點、視野變窄，不自動回正；鎖定（track）：水平角慢慢轉向目標。
 //   轉動：滑鼠拖曳、指標鎖定（點畫面後直接轉，Esc 退出）、右搖桿、觸控右半邊。
 //   回正：放開後，若角色（或馬）在移動，延遲 recenterDelay 秒後約 2 秒內慢慢轉回身後（只轉水平方向，俯仰角保留）；靜止時不自動回正。
 //   跟隨：目標點以彈簧阻尼（臨界阻尼）跟隨，水平與垂直各自的時間常數——不硬綁在角色上，
@@ -42,6 +43,14 @@ export function createCameraRig(cfg, renderCfg, physics, terrain) {
   let speedFactor = 0;
   let scenic = false;
   let scenicBlend = 0;
+  let aiming = false; // 右鍵按住瞄準：拉近、鏡頭移到右肩後、視野變窄
+  let aimBlend = 0;
+  let trackYaw = null; // Tab 鎖定時：鏡頭慢慢轉向目標（null = 不追）
+  const right = new THREE.Vector3();
+  const look = new THREE.Vector3();
+  let shakeAmp = 0; // 鏡頭搖晃（公尺），很快衰減
+  let shakeTime = 0;
+  const shakeLook = new THREE.Vector3();
 
   // 沿射線檢查地形：回傳射線碰到地形（加上餘裕）前的距離
   function terrainHit(from, d, maxDist) {
@@ -60,6 +69,7 @@ export function createCameraRig(cfg, renderCfg, physics, terrain) {
     scale = damp(scale, distanceScale, 3, dt);
     speedFactor = damp(speedFactor, clamp(speed / cfg.speedReference, 0, 1), 2, dt);
     scenicBlend = damp(scenicBlend, scenic ? 1 : 0, 1.5, dt);
+    aimBlend = damp(aimBlend, aiming ? 1 : 0, 12, dt);
 
     if (input.lookX || input.lookY) {
       yawGoal -= input.lookX * cfg.lookSensitivity;
@@ -69,11 +79,14 @@ export function createCameraRig(cfg, renderCfg, physics, terrain) {
     } else {
       idle += dt;
     }
-    if (scenic) {
+    if (trackYaw !== null && !scenic) {
+      // 鎖定：轉向目標（滑鼠仍可微調）
+      yawGoal = dampAngle(yawGoal, trackYaw, 6, dt);
+    } else     if (scenic) {
       // 風景模式：繞著目標緩慢漂移
       yawGoal += cfg.scenic.drift * dt;
       if (idle > cfg.recenterDelay) pitchGoal = damp(pitchGoal, cfg.scenic.pitch, 0.5, dt);
-    } else if (idle > cfg.recenterDelay && speed > cfg.recenterMinSpeed) {
+    } else if (!aiming && idle > cfg.recenterDelay && speed > cfg.recenterMinSpeed) {
       // 移動中：慢慢轉回身後（只轉水平方向；俯仰角保留玩家自己調的，不會被拉回往下看；靜止時不回正）
       yawGoal = dampAngle(yawGoal, heading + Math.PI, cfg.recenterSharpness, dt);
     }
@@ -97,19 +110,40 @@ export function createCameraRig(cfg, renderCfg, physics, terrain) {
     }
 
     dir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-    const want = THREE.MathUtils.lerp(distance * scale * (1 + cfg.speedDistance * speedFactor), cfg.scenic.distance, scenicBlend);
-    const hit = cfg.collision ? Math.min(physics.raycast(pivot, dir, want + cfg.collisionPadding) - cfg.collisionPadding, terrainHit(pivot, dir, want)) : Infinity;
+    // 瞄準：看向右肩前方一點（準星在畫面中央，不會被角色擋住），距離拉近
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    look.copy(pivot).addScaledVector(right, cfg.aim.shoulder * aimBlend);
+    look.y += cfg.aim.lift * aimBlend;
+    const want = THREE.MathUtils.lerp(distance * scale * (1 + cfg.speedDistance * speedFactor) * (1 - (1 - cfg.aim.distance) * aimBlend), cfg.scenic.distance, scenicBlend);
+    const hit = cfg.collision ? Math.min(physics.raycast(look, dir, want + cfg.collisionPadding) - cfg.collisionPadding, terrainHit(look, dir, want)) : Infinity;
     const allowed = Math.max(0.3, Math.min(want, hit));
     // 被擋住時立即拉近，離開遮擋後再平滑退回
     actualDistance = allowed < actualDistance ? allowed : damp(actualDistance, allowed, cfg.zoomSharpness, dt);
 
-    camera.position.copy(pivot).addScaledVector(dir, actualDistance);
+    camera.position.copy(look).addScaledVector(dir, actualDistance);
     const floor = terrain.heightAt(camera.position.x, camera.position.z) + cfg.minHeightAboveGround;
     if (camera.position.y < floor) camera.position.y = floor;
-    camera.lookAt(pivot);
+    // 搖晃：位置與視線一起抖（幾個不同頻率的正弦，不用亂數）
+    shakeTime += dt;
+    shakeAmp *= Math.exp(-5 * dt);
+    shakeLook.copy(look);
+    if (shakeAmp > 0.002) {
+      const a = Math.min(shakeAmp, 1.6);
+      const t = shakeTime;
+      const ox = (Math.sin(t * 41.3) + Math.sin(t * 23.1 + 2)) * 0.5 * a;
+      const oy = (Math.sin(t * 37.7 + 1) + Math.sin(t * 19.9)) * 0.5 * a;
+      const oz = (Math.sin(t * 31.1 + 4) + Math.sin(t * 27.3 + 3)) * 0.5 * a;
+      camera.position.x += ox;
+      camera.position.y += oy;
+      camera.position.z += oz;
+      shakeLook.x += ox * 0.4;
+      shakeLook.y += oy * 0.4;
+      shakeLook.z += oz * 0.4;
+    }
+    camera.lookAt(shakeLook);
 
     // 視野：越快越寬；風景模式另有視野
-    const fov = THREE.MathUtils.lerp(THREE.MathUtils.lerp(cfg.fov[0], cfg.fov[1], speedFactor), cfg.scenic.fov, scenicBlend);
+    const fov = THREE.MathUtils.lerp(THREE.MathUtils.lerp(cfg.fov[0], cfg.fov[1], speedFactor) * (1 - (1 - cfg.aim.fov) * aimBlend), cfg.scenic.fov, scenicBlend);
     if (Math.abs(camera.fov - fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
@@ -124,6 +158,23 @@ export function createCameraRig(cfg, renderCfg, physics, terrain) {
       yawGoal = newYaw;
       pitchGoal = clamp(newPitch, cfg.minPitch, cfg.maxPitch);
       idle = 0;
+    },
+    // 搖晃（地獄業火的蓄力、爆炸）：取較大的那個，很快衰減
+    shake(amount) {
+      shakeAmp = Math.max(shakeAmp, amount);
+    },
+    // 右鍵瞄準
+    setAim(on) {
+      aiming = on;
+      if (on) idle = 0;
+    },
+    get aiming() {
+      return aiming;
+    },
+    // 鎖定目標：鏡頭的水平角慢慢轉向 yaw（null = 停止）
+    track(yaw) {
+      trackYaw = yaw;
+      if (yaw !== null) idle = 0;
     },
     setAspect(aspect) {
       camera.aspect = aspect;

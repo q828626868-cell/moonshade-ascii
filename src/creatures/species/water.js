@@ -9,6 +9,7 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 // ---------------------------------------------------------------- 湖妖
 export const lakeHag = {
   id: 'lakeHag',
+  wet: true, // 一直是濕的（連鎖雷法）
   free: true,
   stopAt: 6,
   define(b) {
@@ -244,6 +245,7 @@ export const lakeHag = {
 // ---------------------------------------------------------------- 沼澤蛙
 export const frog = {
   id: 'frog',
+  wet: true,
   maxDepth: 1,
   define(b) {
     const m = 'frog';

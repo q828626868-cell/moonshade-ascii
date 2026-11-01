@@ -89,7 +89,7 @@ export function createCreatures(cfg, deps) {
 
   // ---- 建立一隻 ----
   const markGeometry = new THREE.PlaneGeometry(0.55, 1);
-  const markMaterials = { alert: materials.get('alert'), lost: materials.get('alertLost'), stun: materials.get('stun') };
+  const markMaterials = { alert: materials.get('alert'), lost: materials.get('alertLost'), stun: materials.get('stun'), frozen: materials.get('iceShard') };
   function spawnCreature(sp, S, x, z, opts = {}) {
     const T = template(sp);
     const meta = T.meta;
@@ -306,9 +306,15 @@ export function createCreatures(cfg, deps) {
     if (c.sp.damageScale) m *= c.sp.damageScale(c, element, w);
     return m;
   }
+  // 濕：泡在水裡、下雨、潛在水下的湖妖、兩棲類（連鎖雷法打到濕的目標傷害加倍）
+  function isWet(c) {
+    return deps.weather.rain > 0.05 || c.sp.wet === true || (c.sub ?? 0) > 0.3 || terrain.waterDepthAt(c.pos.x, c.pos.z) > 0.1;
+  }
   function hurt(c, amount, element, opts = {}) {
     if (!c.alive || !c.present) return 0;
-    const m = multiplier(c, element);
+    let m = multiplier(c, element);
+    // 濕的目標被雷打：×wetBonus（湖妖的「怕雷 ×2」本來就是全身濕透，不再疊加）
+    if (element === 'thunder' && opts.wetBonus && m > 0 && isWet(c) && (c.stats.weak.thunder ?? 1) < opts.wetBonus) m *= opts.wetBonus;
     const dmg = Math.round(amount * m);
     const kind = m === 0 ? 'immune' : m > 1.01 ? 'weak' : m < 0.99 ? 'resist' : 'normal';
     hud?.number(c.aimPoint(new THREE.Vector3()), dmg, kind, element);
@@ -320,7 +326,7 @@ export function createCreatures(cfg, deps) {
     }
     c.hp -= dmg;
     c.anim.flinch = 1;
-    combat.sparks(c.pos.x, c.pos.y + c.aimHeight, c.pos.z, kind === 'weak' ? 7 : 3, element === 'fire' ? 'ember' : element === 'ice' ? 'frost' : 'spark', 3);
+    if (!opts.dot) combat.sparks(c.pos.x, c.pos.y + c.aimHeight, c.pos.z, kind === 'weak' ? 7 : 3, element === 'fire' ? 'ember' : element === 'ice' ? 'frost' : 'spark', 3);
     c.sp.onHurt?.(c, dmg, element, w, brain, opts);
     if (c.hp <= 0) {
       die(c);
@@ -342,6 +348,7 @@ export function createCreatures(cfg, deps) {
       c.slow = opts.slow;
       c.slowT = opts.slowSeconds ?? 3;
     }
+    if (opts.dot) return dmg; // 燃燒的持續傷害：不擊退、不讓狼逃
     // 狼怕火：被火燒到會逃開
     if (element === 'fire' && c.stats.fearsFire && !c.isAlpha) brain.flee(c, combat.player.pos.x, combat.player.pos.z, 1.6);
     else if (c.state !== 'return') brain.provoked(c);
@@ -367,6 +374,68 @@ export function createCreatures(cfg, deps) {
 
   let focus = null;
 
+  // ---- 狀態：燃燒、冰凍、打斷（法術用，見 spells.js）----
+  // 燃燒：每 0.5 秒受一次火的傷害（照火的弱點／抗性），進水就熄滅；身上冒火花
+  function burn(c, seconds, dps) {
+    if (!c.alive || multiplier(c, 'fire') === 0) return;
+    c.burnT = Math.max(c.burnT ?? 0, seconds);
+    c.burnDps = Math.max(c.burnDps ?? 0, dps);
+    c.burnTick = c.burnTick ?? 0;
+  }
+  function burnTick(c, dt) {
+    c.burnT -= dt;
+    if (terrain.waterDepthAt(c.pos.x, c.pos.z) > 0.3 || (c.sub ?? 0) > 0.3) c.burnT = 0;
+    if ((c.burnTick += dt) >= 0.5) {
+      c.burnTick = 0;
+      hurt(c, c.burnDps * 0.5, 'fire', { dot: true });
+    }
+    if (c.alive && w.rng.next() < 0.5) combat.sparks(c.pos.x + w.rng.range(-0.3, 0.3) * c.scale, c.pos.y + c.aimHeight * w.rng.range(0.5, 1.6), c.pos.z + w.rng.range(-0.3, 0.3) * c.scale, 1, 'ember', 1.5);
+    if (c.burnT <= 0) c.burnDps = 0;
+  }
+  // 冰凍 seconds 秒：停下、取消前搖
+  function freeze(c, seconds) {
+    if (!c.alive || seconds <= 0) return;
+    if (c.atk) brain.endAttack(c);
+    if (c.state === 'attack') brain.setState(c, 'chase');
+    c.frozenT = Math.max(c.frozenT ?? 0, seconds);
+    c.mark = 'frozen';
+    c.markT = seconds;
+    c.burnT = 0;
+  }
+  // 打斷蓄力：前搖中的攻擊取消並短暫暈眩
+  function interrupt(c, stun) {
+    if (!c.alive || !c.atk || c.atk.phase !== 'windup') return false;
+    brain.endAttack(c);
+    brain.stun(c, stun);
+    return true;
+  }
+  // 沿射線找第一隻野怪（以 aimPoint 為中心的球）；回傳 { c, t } 或 null。pad：放寬的半徑
+  function rayPick(origin, dir, maxT, minT = 0, pad = 0) {
+    let best = null;
+    let bt = maxT;
+    for (const c of list) {
+      if (!c.alive || !c.present || !c.active || !c.model.object.visible || c.sp.critter) continue;
+      const r = Math.max(c.radius, c.markHeight * 0.45) + pad;
+      const cx = c.pos.x - origin.x;
+      const cy = c.pos.y + c.aimHeight - origin.y;
+      const cz = c.pos.z - origin.z;
+      const t = cx * dir.x + cy * dir.y + cz * dir.z;
+      if (t < minT || t > bt) continue;
+      const d2 = cx * cx + cy * cy + cz * cz - t * t;
+      if (d2 < r * r) {
+        bt = t;
+        best = c;
+      }
+    }
+    return best ? { c: best, t: bt } : null;
+  }
+  // 範圍內的敵人（不含小動物），由近到遠
+  function hostilesNear(x, z, range, exclude = null) {
+    return list
+      .filter((c) => c.alive && c.present && c.active && !c.sp.critter && c !== exclude && Math.hypot(c.pos.x - x, c.pos.z - z) <= range)
+      .sort((a, b) => Math.hypot(a.pos.x - x, a.pos.z - z) - Math.hypot(b.pos.x - x, b.pos.z - z));
+  }
+
   // ---- 每個固定步長 ----
   function fixedUpdate(dt) {
     w.dt = dt;
@@ -379,6 +448,7 @@ export function createCreatures(cfg, deps) {
       c.prevHeading = c.heading;
       c.lastHitT += dt;
       if (c.slowT > 0 && (c.slowT -= dt) <= 0) c.slow = 0;
+      if (c.alive && c.burnT > 0) burnTick(c, dt);
       const d = Math.hypot(c.pos.x - p.x, c.pos.z - p.z);
       const near = d < cfg.activeRadius;
       if (!c.alive) {
@@ -410,6 +480,14 @@ export function createCreatures(cfg, deps) {
       }
       c.active = true;
       stats.active++;
+      // 冰凍：完全不動、不出招（姿勢也停住）
+      if (c.frozenT > 0) {
+        c.frozenT -= dt;
+        c.vx = c.vz = c.speed = 0;
+        if (c.frozenT <= 0 && c.mark === 'frozen') c.mark = null;
+        counts.frozen = (counts.frozen ?? 0) + 1;
+        continue;
+      }
       brain.think(c, dt);
       counts[c.state] = (counts[c.state] ?? 0) + 1;
     }
@@ -494,7 +572,7 @@ export function createCreatures(cfg, deps) {
       stats.drawn++;
       c.poseDt += dt;
       const every = d < LOD.half ? 1 : d < LOD.third ? 2 : 3;
-      if (!teleported && (frameNo + c.id) % every !== 0) {
+      if (c.frozenT > 0 || (!teleported && (frameNo + c.id) % every !== 0)) {
         // 這幀不更新姿勢：只把根移到內插後的位置
         obj.position.set(c.draw.x, c.stats.flying || c.sp.free || c.airborne ? c.draw.y : ground(c.draw.x, c.draw.z) + c.anim.ground, c.draw.z);
         obj.rotation.y = c.drawHeading;
@@ -637,6 +715,7 @@ export function createCreatures(cfg, deps) {
       const top = c.pos.y + c.aimHeight * 2 + 1;
       if (!opts.vertical && (py < c.pos.y - 1.5 || py > top + 1.5)) continue;
       hurt(c, damage, element, opts);
+      opts.onHit?.(c);
       n++;
     }
     return n;
@@ -706,5 +785,11 @@ export function createCreatures(cfg, deps) {
     hurt,
     playerDown,
     multiplier,
+    burn,
+    freeze,
+    interrupt,
+    isWet,
+    rayPick,
+    hostilesNear,
   };
 }

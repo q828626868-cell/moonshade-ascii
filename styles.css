@@ -370,3 +370,131 @@ body {
 .hud-number.ice { color: #a8dcff; }
 .hud-number.thunder { color: #fff08a; }
 .hud-number.wind { color: #b8f0d8; }
+
+/* ---- 法術：魔力、蓄力／引導條、準星、鎖定框（ui/combatHud.js）---- */
+#hud-hp .mp {
+  height: 4px;
+  margin-top: 2px;
+  background: #1a1d24;
+  border: 1px solid #333a46;
+}
+#hud-hp .mp > div {
+  height: 100%;
+  background: #4f8fd8;
+}
+#hud-skills .slot .cost {
+  position: absolute;
+  right: 2px;
+  top: 0;
+  font-size: 9px;
+  color: #6f9fd8;
+}
+#hud-skills .slot.poor {
+  opacity: 0.45;
+}
+#hud-skills .slot.fireball.ready { border-color: #b8623a; }
+#hud-skills .slot.chain.ready { border-color: #c9b54a; }
+#hud-skills .slot.nova.ready { border-color: #6a9fc9; }
+#hud-skills .slot.storm.ready { border-color: #9a7fd8; }
+#hud-cast {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: 180px;
+  transform: translateX(-50%);
+  text-align: center;
+  color: #ffd27a;
+}
+#hud-cast .bar {
+  height: 6px;
+  margin-top: 2px;
+  background: rgba(6, 7, 10, 0.75);
+  border: 1px solid #3a3326;
+}
+#hud-cast .bar > div {
+  height: 100%;
+  background: #ff9a4a;
+}
+#hud-cast[hidden],
+#hud-crosshair[hidden],
+#hud-lock[hidden],
+#touch-skills[hidden] {
+  display: none;
+}
+#hud-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 18px;
+  color: rgba(223, 230, 242, 0.45);
+  text-shadow: 0 0 3px #000;
+}
+#hud-crosshair.aiming {
+  font-size: 22px;
+  color: #ffd27a;
+}
+#hud-lock {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 20px;
+  font-weight: bold;
+  letter-spacing: 0.2em;
+  color: #ff7a5a;
+  text-shadow: 0 0 4px #000;
+  white-space: pre;
+}
+
+/* ---- 手機：右下角的技能鈕（ui/touchSkills.js）；桌面版的技能列隱藏、血量移到左上 ---- */
+body.touch #hud-skills {
+  display: none;
+}
+body.touch #hud-hp {
+  top: 8px;
+  bottom: auto;
+}
+#touch-skills {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+}
+#touch-skills .skill {
+  position: fixed;
+  border-radius: 50%;
+  background: conic-gradient(rgba(6, 7, 10, 0.75) calc(var(--cd, 0) * 360deg), rgba(30, 36, 48, 0.55) 0);
+  border: 2px solid #5a6578;
+  color: #dfe6f2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#touch-skills .skill.held {
+  border-color: #ffd27a;
+  background-color: rgba(80, 70, 40, 0.6);
+}
+#touch-skills .skill.poor {
+  opacity: 0.45;
+}
+#touch-skills .skill.fireball { border-color: #b8623a; }
+#touch-skills .skill.chain { border-color: #c9b54a; }
+#touch-skills .skill.nova { border-color: #6a9fc9; }
+#touch-skills .skill.wind { border-color: #6fb59a; }
+#touch-skills .skill.storm { border-color: #9a7fd8; }
+#touch-skills .knob {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 210, 122, 0.8);
+  pointer-events: none;
+  opacity: 0;
+}
+#touch-skills .skill.held .knob {
+  opacity: 1;
+}

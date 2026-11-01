@@ -18,8 +18,14 @@
         el.hidden = false;
         el.textContent += msg + '\n';
       }
-      window.addEventListener('error', function (e) { showFatal(e.message || String(e)); });
-      window.addEventListener('unhandledrejection', function (e) { showFatal(String(e.reason)); });
+      // 執行中的錯誤：只在開發者模式（?dev=1）顯示在畫面上，平常只記在主控台（F12）
+      var devMode = new URLSearchParams(location.search).has('dev');
+      function runtimeError(msg) {
+        console.error(msg);
+        if (devMode) showFatal(msg);
+      }
+      window.addEventListener('error', function (e) { runtimeError(e.message || String(e)); });
+      window.addEventListener('unhandledrejection', function (e) { runtimeError(String(e.reason)); });
     </script>
     <script type="module" src="src/main.js" onerror="showFatal('無法載入 src/main.js（需要以 http:// 開啟，見 README）')"></script>
   </body>

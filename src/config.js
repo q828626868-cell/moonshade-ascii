@@ -268,6 +268,7 @@ export const CONFIG = {
     fireBolt: { chars: '*@', color: '#ff8a2a', emissive: 1 }, // 火球
     iceShard: { chars: '*+', color: '#c4e8ff', emissive: 0.8 }, // 冰錐、冰息
     roots: { chars: 'Y|/\\', color: '#7d6242', jitter: 0.4 }, // 樹精從地下冒出的根
+    aimGuide: { chars: '+', shadowChars: '+', color: '#7fd8ff', emissive: 1, ownsCreases: false }, // 法術瞄準時地上的範圍（外框）
   },
 
   surface: {
@@ -1009,18 +1010,37 @@ export const CONFIG = {
     respawnSeconds: 3.5, // 倒下後多久在灰燼村醒來
     invulnerable: 0.6, // 被打中後幾秒內不再受傷
     jumpDodge: 0.22, // 公尺：震波經過時離地這麼高就躲過
-    aimCone: 0.45, // 弧度：鏡頭前方這個角度內的野怪會被自動瞄準
-    // 武器與法術（按鍵見 input.bindings）
-    sword: { damage: 13, range: 2.7, angle: 1.9, cooldown: 0.5, element: 'physical' },
-    spells: {
-      fire: { name: '火球', damage: 16, cooldown: 0.9, speed: 24, range: 32, radius: 1.6, burn: 4, element: 'fire' }, // burn：地上燒幾秒（火堆，狼會怕、蛛網會燒掉）
-      thunder: { name: '雷擊', damage: 20, cooldown: 1.6, range: 30, radius: 1.4, element: 'thunder' },
-      ice: { name: '冰錐', damage: 13, cooldown: 0.9, speed: 28, range: 32, radius: 1.2, slow: 0.45, slowSeconds: 3, element: 'ice' },
-      wind: { name: '風刃', damage: 8, cooldown: 2.2, range: 8, angle: 1.1, knock: 6, element: 'wind' },
-    },
+    aimCone: 0.45, // 弧度：劍揮向鏡頭前方這個角度內的野怪
+    sword: { damage: 13, range: 2.7, angle: 1.9, cooldown: 0.5, element: 'physical' }, // 滑鼠左鍵（或 F）
     weakDefault: 1.5,
     hazards: { web: { seconds: 14, radius: 2, slow: 0.45 }, acid: { seconds: 7, radius: 1.9, dps: 0.6 } }, // 地上的蛛網、毒池（dps 為施放者傷害的倍數）
     campfires: { count: 7, minVillage: 110, radius: 1, light: { radius: 9, power: 1.6, flicker: 0.3 } }, // 野外的火堆（狼不敢靠近）
+  },
+
+  // 法術（creatures/spells.js）：快捷鍵 1–5，每招有冷卻與魔力消耗；騎馬時也能施放（引導技「雷暴」除外）。
+  // 鍵盤：火球按住蓄力、放開發射；雷暴按住選範圍、放開施放；其他按下就放。手機：右下角的技能鈕按住拖曳調方向，放開施放。
+  spells: {
+    mp: 100,
+    mpRegen: 7, // 每秒
+    aimRange: 45, // 公尺：準星的射線最遠查到哪
+    lockRange: 35, // 公尺：Tab 鎖定的範圍
+    fireball: {
+      name: '火球術', cost: 14, cooldown: 0.7, speed: 26, range: 45, radius: 3, damage: 18,
+      charge: { seconds: 1.2, cost: 14, radius: 5, damage: 2.2, size: 2.4 }, // 長按蓄力：滿蓄力時多耗的魔力、爆炸半徑、傷害倍率、火球大小
+      burn: { seconds: 4, dps: 4 }, // 燃燒狀態
+      groundFire: 4, // 秒：落地處燒著（狼怕、蛛網燒掉）
+    },
+    // 地獄業火：快速連按兩下 1（doubleTap 秒內）開始蓄力；引導技（不用一直按著）：charge 秒後自動朝準星發射，
+    // 期間走得慢、不能放其他招，翻滾、上馬或倒下就中斷；騎馬時不能用。爆炸後落地處留下一片火海（fires 團火，燒 groundFire 秒）
+    hellfire: {
+      name: '地獄業火', cost: 80, cooldown: 0, charge: 13, doubleTap: 0.3, channel: true, moveScale: 0.35,
+      speed: 16, range: 80, radius: 14, damage: 2000, knock: 16, size: 6, burn: { seconds: 8, dps: 18 }, groundFire: 15, fires: 18,
+    },
+    chain: { name: '連鎖雷法', cost: 20, cooldown: 2.5, range: 35, damage: 22, jumps: 4, jumpRange: 8, falloff: 0.8, wet: 2, pickCone: 0.08 }, // 打到濕的目標傷害 ×wet
+    nova: { name: '冰霜新星', cost: 24, cooldown: 9, radius: 7, damage: 10, freeze: 2, eliteFreeze: 1, bossFreeze: 0.5, expand: 0.35 },
+    wind: { name: '風刃', cost: 12, cooldown: 3, range: 8, angle: 1.3, damage: 9, knock: 7, interruptStun: 0.5 }, // 擊退、打斷蓄力
+    storm: { name: '雷暴', cost: 50, cooldown: 60, range: 32, radius: 7, seconds: 5, bolts: 12, rainMultiplier: 2, damage: 26, boltRadius: 2.2, dim: 0.6, moveScale: 0.4, channel: true }, // 引導技：期間移動變慢、不能放其他招
+    roll: { cooldown: 0.6, distance: 3.8, seconds: 0.45, invulnerable: 0.3, doubleTap: 0.28 }, // 翻滾迴避
   },
 
   // 開發用替身（之後由騎馬的旅人取代），用來測試移動手感與鏡頭
@@ -1075,6 +1095,7 @@ export const CONFIG = {
     terrainStep: 0.5, // 公尺：沿鏡頭射線檢查地形的間隔
     // 風景模式（V，開發者面板關著時）：拉遠、視野較寬，鏡頭繞著目標緩慢漂移
     scenic: { distance: 28, pitch: 0.3, drift: 0.05, fov: 48 },
+    aim: { shoulder: 0.75, lift: 0.15, distance: 0.55, fov: 0.8 }, // 右鍵瞄準：看向右肩外 shoulder 公尺、距離與視野乘上的倍數
     thinFoliage: true, // 角色被樹葉擋住時，擋著的樹葉字元變稀疏
     startScenic: false, // 測試用：一開始就是風景模式
     collision: true, // 鏡頭被物件擋住時拉近
@@ -1092,17 +1113,22 @@ export const CONFIG = {
       sprint: ['ShiftLeft', 'ShiftRight'],
       jump: ['Space'],
       call: ['KeyC'], // 吹口哨叫馬
-      sword: ['KeyF'], // 揮劍
-      fire: ['Digit1'], // 法術：火球、雷擊、冰錐、風刃
-      thunder: ['Digit2'],
-      ice: ['Digit3'],
+      sword: ['Mouse0', 'KeyF'], // 普攻（劍）：滑鼠左鍵
+      fireball: ['Digit1'], // 法術 1–5：火球術、連鎖雷法、冰霜新星、風刃、雷暴
+      chain: ['Digit2'],
+      nova: ['Digit3'],
       wind: ['Digit4'],
+      storm: ['Digit5'],
+      aim: ['Mouse2'], // 右鍵按住瞄準
+      lock: ['Tab'], // 鎖定最近的敵人（再按換下一個）
+      roll: ['ControlLeft', 'ControlRight', 'KeyQ'], // 翻滾迴避（也可以連點兩下方向鍵）
+      stone: ['KeyG'], // 往準星的水面丟石頭
     },
     // 手把（標準配置）：按鍵編號 → 對應的鍵盤按鍵；lookSpeed 右搖桿推到底時每秒相當於滑鼠移動幾像素
     gamepad: {
       deadzone: 0.15,
       lookSpeed: 900,
-      buttons: { 0: 'Space', 1: 'KeyF', 2: 'KeyC', 3: 'KeyE', 4: 'Digit1', 5: 'Digit2', 6: 'Digit3', 7: 'Digit4', 10: 'GamepadL3', 8: 'KeyO', 9: 'Backquote' }, // A 跳、B 揮劍、X 叫馬、Y 上下馬、LB／RB／LT／RT 火／雷／冰／風、左搖桿按下 襲步
+      buttons: { 0: 'Space', 1: 'KeyQ', 2: 'KeyC', 3: 'KeyE', 4: 'Digit1', 5: 'Digit2', 6: 'Mouse2', 7: 'Mouse0', 12: 'Digit3', 13: 'Digit4', 14: 'Digit5', 15: 'Tab', 10: 'GamepadL3', 8: 'KeyO', 9: 'Backquote' }, // A 跳、B 翻滾、X 叫馬、Y 上下馬、LB／RB 火球／連鎖雷、LT 瞄準、RT 揮劍、十字鍵上／下／左 冰霜新星／風刃／雷暴、十字鍵右 鎖定、左搖桿按下 襲步
     },
     touch: {
       joystickRadius: 60, // CSS px
@@ -1132,8 +1158,8 @@ export const CONFIG = {
 
   ui: {
     hintSeconds: 9,
-    desktopHint: 'WASD 移動（以鏡頭為準）· Shift 跑；騎馬時按住加速、連點兩下襲步 · 空白鍵 跳躍 · E 上馬／下馬 · C 吹口哨叫馬 · V 風景模式 · 點擊畫面鎖定滑鼠轉鏡頭（Esc 解除）並開啟音效 · 滾輪縮放 · F 揮劍 · 1–4 火球／雷擊／冰錐／風刃（自動瞄準鏡頭前方的野怪；地上出現紅色 ! 時快躲開）· O 換裝 · N 靜音 · ` 開發者面板',
-    touchHint: '左半邊拖曳移動 · 右半邊拖曳轉視角 · 三指點擊開發者面板',
+    desktopHint: 'WASD 移動（以鏡頭為準）· Shift 跑；騎馬時按住加速、連點兩下襲步 · 空白鍵 跳躍 · E 上馬／下馬 · C 吹口哨叫馬 · V 風景模式 · 點擊畫面鎖定滑鼠轉鏡頭（Esc 解除）並開啟音效 · 滾輪縮放 · 左鍵 揮劍 · 右鍵按住 瞄準 · 1–5 火球（按住蓄力）／連鎖雷／冰霜新星／風刃／雷暴（按住選範圍）· Tab 鎖定 · Ctrl／Q 或連點方向鍵 翻滾（地上出現紅色 ! 時快躲開）· G 丟石頭· O 換裝 · N 靜音 · ` 開發者面板',
+    touchHint: '左半邊拖曳移動 · 右半邊拖曳轉視角 · 右下角技能鈕：按住拖曳調方向、放開施放 · 三指點擊開發者面板',
     bannerSeconds: 4, // 區域名稱顯示多久
     bannerDelay: 0.8, // 進入新區域多久後才顯示（避免在邊界來回閃）
     legend: [

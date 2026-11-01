@@ -184,8 +184,24 @@ export function createTelegraphs({ terrain, materials, parent }) {
     };
   }
 
-  // 震波：往外擴散的一圈（每幀重建，只有一條環帶）
-  function ringMesh() {
+  // 法術瞄準時地上的範圍：只有外框（aimGuide 材質，藍色的 +）
+  const guideMaterial = materials.get('aimGuide');
+  function guide(shape, x, z, heading) {
+    const { edge } = build(shape);
+    const mesh = new THREE.Mesh(drape(edge, x, z, heading), guideMaterial);
+    mesh.frustumCulled = false;
+    mesh.layers.set(1);
+    parent.add(mesh);
+    return {
+      remove() {
+        parent.remove(mesh);
+        mesh.geometry.dispose();
+      },
+    };
+  }
+
+  // 震波：往外擴散的一圈（每幀重建，只有一條環帶）；material：預設是預告的紅色 !
+  function ringMesh(material = 'telegraphEdge') {
     const segs = 72;
     const pos = new Float32Array(segs * 18);
     const nor = new Float32Array(segs * 18);
@@ -193,7 +209,7 @@ export function createTelegraphs({ terrain, materials, parent }) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    const mesh = new THREE.Mesh(g, edgeMaterial);
+    const mesh = new THREE.Mesh(g, materials.get(material));
     mesh.frustumCulled = false;
     mesh.layers.set(1);
     parent.add(mesh);
@@ -229,7 +245,7 @@ export function createTelegraphs({ terrain, materials, parent }) {
     };
   }
 
-  return { create, disk, ringMesh, get count() {
+  return { create, guide, disk, ringMesh, get count() {
     return active.size;
   } };
 }

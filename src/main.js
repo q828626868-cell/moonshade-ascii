@@ -40,6 +40,8 @@ import { createClock } from './world/clock.js';
 import { createCombat } from './creatures/combat.js';
 import { createCreatures } from './creatures/creatures.js';
 import { createCombatHud } from './ui/combatHud.js';
+import { createSpells } from './creatures/spells.js';
+import { createTouchSkills } from './ui/touchSkills.js';
 
 const overrides = new URLSearchParams(location.search).get('set');
 applyOverrides(CONFIG, overrides);
@@ -293,7 +295,13 @@ const creatures = createCreatures(CONFIG.creatures, {
   ridgeCfg: CONFIG.terrain.ridge,
   lineStyle: combatStyles,
 });
-const hud = createCombatHud(CONFIG.combat, Object.fromEntries(['sword', 'fire', 'thunder', 'ice', 'wind'].map((k) => [k, CONFIG.input.bindings[k][0].replace(/^(Key|Digit)/, '')])));
+const SP = CONFIG.spells;
+const SPELL_KINDS = ['fireball', 'chain', 'nova', 'wind', 'storm'];
+const keyName = (code) => code.replace(/^(Key|Digit)/, '').replace('Mouse0', '左鍵');
+const hud = createCombatHud(CONFIG.combat, [
+  { kind: 'sword', key: keyName(CONFIG.input.bindings.sword[0]), name: '劍' },
+  ...SPELL_KINDS.map((k) => ({ kind: k, key: keyName(CONFIG.input.bindings[k][0]), name: SP[k].name, cost: SP[k].cost })),
+]);
 combat.bind(creatures, hud);
 document.getElementById('hud').hidden = showcase.enabled || horseShow.enabled; // 展示模式不顯示戰鬥資訊
 creatures.bindHud(hud);
@@ -313,35 +321,190 @@ view.scene.add(combat.group, creatures.group);
 view.lines.add(combat.lines);
 for (const source of creatures.lines) view.lines.add(source);
 
-// 玩家的攻擊：F 揮劍、1–4 法術，方向是鏡頭的前方（鏡頭前方的野怪會被自動瞄準）；人物的右手跟著揮、舉起
+// ---- 法術與普攻（creatures/spells.js）----
+const spells = createSpells(SP, {
+  combat,
+  creatures,
+  terrain,
+  physics,
+  weather,
+  rng: rng.fork('spells'),
+  proxy,
+  traveler,
+  character,
+  materials,
+  rig,
+  // 地獄業火的聲音（ambience 在後面才建立，所以包成函式）
+  audio: { charge: (k) => ambience.hellCharge(k), launch: () => ambience.hellLaunch(), boom: (v) => ambience.hellBoom(v) },
+});
+view.lines.add(spells.lines);
+const playing = () => !showcase.enabled && !horseShow.enabled;
+// 瞄準：每幀算一次。滑鼠：鏡頭中央的射線（準星）；手機拖曳技能鈕：拖的方向與距離；Tab 鎖定時對準鎖定的目標
+const aim = { point: new THREE.Vector3(), creature: null, dirX: 0, dirZ: -1, dist: 0 };
+let touchAim = null; // { kind, x, y, k }：手機正在拖曳的技能鈕
+function updateAim() {
+  if (touchAim) {
+    const f = { x: -Math.sin(rig.yaw), z: -Math.cos(rig.yaw) };
+    const r = { x: Math.cos(rig.yaw), z: -Math.sin(rig.yaw) };
+    const dx = r.x * touchAim.x - f.x * touchAim.y;
+    const dz = r.z * touchAim.x - f.z * touchAim.y;
+    const l = Math.hypot(dx, dz) || 1;
+    const range = SP[touchAim.kind]?.range ?? 20;
+    return spells.dragAim(dx / l, dz / l, touchAim.k, range, aim);
+  }
+  rig.camera.updateMatrixWorld();
+  return spells.resolveAim(rig.camera, aim);
+}
+
+// 人物的動作：揮劍、施法（舉手）、蓄力（手一直舉著）、翻滾
 const action = { kind: null, t: 0 };
-function playerAttack(kind) {
-  if (showcase.enabled || horseShow.enabled) return;
-  const aim = { x: -Math.sin(rig.yaw), z: -Math.cos(rig.yaw) };
-  if (combat.attack(kind, aim)) {
-    action.kind = kind;
-    action.t = 0;
+function playAction(kind) {
+  action.kind = kind;
+  action.t = 0;
+}
+// 普攻：揮向鎖定的目標、瞄準時的準星方向，或鏡頭前方
+function swordAttack() {
+  if (!playing()) return;
+  updateAim();
+  const lockOn = spells.state.lock;
+  const dir = lockOn || rig.aiming ? { x: aim.dirX, z: aim.dirZ } : { x: -Math.sin(rig.yaw), z: -Math.cos(rig.yaw) };
+  if (combat.attack('sword', dir)) playAction('sword');
+}
+for (const code of CONFIG.input.bindings.sword) input.onPress(code, swordAttack);
+// 法術：火球（按住蓄力）與雷暴（按住選範圍）放開才施放；其他按下就放
+const HOLD = new Set(['fireball', 'storm']);
+function spellPress(kind) {
+  if (!playing()) return;
+  updateAim();
+  if (!spells.begin(kind)) return;
+  if (!HOLD.has(kind)) spellRelease(kind);
+}
+function spellRelease(kind) {
+  if (!playing() || spells.state.pending?.kind !== kind) return;
+  updateAim();
+  if (spells.release(kind, aim)) playAction('cast');
+}
+for (const kind of SPELL_KINDS) {
+  for (const code of CONFIG.input.bindings[kind]) {
+    input.onPress(code, () => spellPress(kind));
+    input.onRelease(code, () => spellRelease(kind));
   }
 }
-for (const kind of ['sword', 'fire', 'thunder', 'ice', 'wind']) {
-  for (const code of CONFIG.input.bindings[kind]) input.onPress(code, () => playerAttack(kind));
+// 翻滾：往移動的方向（沒有輸入時往前）；Ctrl、Q，或連點兩下方向鍵
+function rollToward(moveX, moveY) {
+  if (!playing()) return;
+  let dx;
+  let dz;
+  if (moveX || moveY) {
+    const f = { x: -Math.sin(rig.yaw), z: -Math.cos(rig.yaw) };
+    const r = { x: Math.cos(rig.yaw), z: -Math.sin(rig.yaw) };
+    dx = r.x * moveX + f.x * moveY;
+    dz = r.z * moveX + f.z * moveY;
+  } else {
+    dx = Math.sin(proxy.heading);
+    dz = Math.cos(proxy.heading);
+  }
+  if (spells.roll(dx, dz)) playAction('roll');
 }
+for (const code of CONFIG.input.bindings.roll) input.onPress(code, () => rollToward(frameInput.moveX, frameInput.moveY));
+{
+  const lastTap = new Map();
+  const dirs = { forward: [0, 1], back: [0, -1], left: [-1, 0], right: [1, 0] };
+  for (const [name, [mx, my]] of Object.entries(dirs)) {
+    for (const code of CONFIG.input.bindings[name]) {
+      input.onPress(code, () => {
+        const now = performance.now();
+        if (now - (lastTap.get(name) ?? -1e9) < SP.roll.doubleTap * 1000) {
+          lastTap.set(name, -1e9);
+          rollToward(mx, my);
+        } else lastTap.set(name, now);
+      });
+    }
+  }
+}
+// Tab：鎖定最近的敵人（再按換下一個；只有一隻時再按解除）
+for (const code of CONFIG.input.bindings.lock) input.onPress(code, () => playing() && spells.lockNext());
+// Ctrl + W 會直接關掉分頁（瀏覽器不讓網頁攔下來）：遊戲中離開前先問一下
+window.addEventListener('beforeunload', (e) => {
+  if (!playing() || !ambience.started) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+// 手機：右下角的技能鈕
+const touchSkills = createTouchSkills(
+  [
+    { kind: 'sword', short: '劍' },
+    { kind: 'roll', short: '滾' },
+    ...SPELL_KINDS.map((k) => ({ kind: k, short: SP[k].name.slice(0, 2), spell: true })),
+  ],
+  {
+    begin(kind) {
+      touchAim = null;
+      if (playing()) spells.begin(kind);
+    },
+    drag(kind, d) {
+      touchAim = d ? { kind, ...d } : null;
+    },
+    release(kind) {
+      if (playing() && spells.state.pending?.kind === kind) {
+        updateAim();
+        if (spells.release(kind, aim)) playAction('cast');
+      }
+      touchAim = null;
+    },
+    cancel() {
+      spells.cancel();
+      touchAim = null;
+    },
+    sword: swordAttack,
+    roll: () => rollToward(frameInput.moveX, frameInput.moveY),
+  },
+);
+if (!playing()) document.getElementById('touch-skills').hidden = true;
+
+character.object.rotation.order = 'YXZ';
 function actionPose(dt) {
+  const B = character.bones;
+  character.object.rotation.x = 0;
+  // 蓄力中：右手一直舉著
+  if (spells.charge >= 0 || spells.state.pending?.kind === 'storm' || spells.channel >= 0) {
+    B.upperArmR.rotateX(-1.5);
+    B.forearmR.rotateX(-0.3);
+    if (spells.channel >= 0) {
+      B.upperArmL.rotateX(-2.4); // 引導雷暴：雙手高舉
+      B.upperArmR.rotateX(-0.9);
+    }
+  }
   if (!action.kind) return;
   action.t += dt;
-  const T = action.kind === 'sword' ? 0.35 : 0.45;
+  const T = action.kind === 'sword' ? 0.35 : action.kind === 'roll' ? SP.roll.seconds : 0.45;
   if (action.t > T) {
     action.kind = null;
     return;
   }
   const k = action.t / T;
-  const B = character.bones;
   if (action.kind === 'sword') {
     // 揮劍：右臂從右上往左下掃
     const s = Math.sin(Math.PI * k);
     B.upperArmR.rotateX(-1.6 * s);
     B.upperArmR.rotateZ(-0.9 * (1 - k) * s);
     B.spine3.rotateY(0.5 - k * 1.0);
+  } else if (action.kind === 'roll') {
+    // 翻滾：縮成一團往前翻一圈（繞腰部高度轉，不是繞腳底）
+    const root = character.object;
+    const a = Math.PI * 2 * k;
+    const h = 0.55 * character.scale;
+    root.rotation.x = a;
+    root.position.x += Math.sin(proxy.heading) * -Math.sin(a) * h;
+    root.position.z += Math.cos(proxy.heading) * -Math.sin(a) * h;
+    root.position.y += h - Math.cos(a) * h;
+    const curl = Math.sin(Math.PI * k);
+    B.spine1.rotateX(0.6 * curl);
+    B.neck.rotateX(0.5 * curl);
+    for (const S of ['L', 'R']) {
+      B[`thigh${S}`].rotateX(-1.3 * curl);
+      B[`shin${S}`].rotateX(1.6 * curl);
+    }
   } else {
     // 施法：右手往前舉、掌心朝前
     const s = Math.sin(Math.PI * Math.min(1, k * 1.6));
@@ -371,22 +534,21 @@ input.onPress(CONFIG.clock.skipKey, () => {
   if (devPanel.visible) clock.skip(1);
 });
 
-// 丟石頭：滑鼠鎖定時按左鍵，往畫面中央的水面丟（沒有鎖定時以點的位置）
+// 丟石頭：G，往畫面中央（準星）的水面丟（左鍵是揮劍）
 const stoneRay = new THREE.Raycaster();
 const stoneHit = new THREE.Vector3();
 const stoneFrom = new THREE.Vector3();
-canvas.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || !water.hasWater) return;
-  const locked = document.pointerLockElement === canvas;
-  if (CONFIG.input.pointerLock && !locked) return; // 第一下是鎖定滑鼠
-  const ndc = locked ? new THREE.Vector2(0, 0) : new THREE.Vector2((e.offsetX / canvas.clientWidth) * 2 - 1, -(e.offsetY / canvas.clientHeight) * 2 + 1);
-  stoneRay.setFromCamera(ndc, rig.camera);
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -water.surface);
-  if (!stoneRay.ray.intersectPlane(plane, stoneHit)) return;
-  character.bones.handR.getWorldPosition(stoneFrom);
-  if (stoneFrom.distanceTo(stoneHit) > CONFIG.water.stone.range || terrain.waterDepthAt(stoneHit.x, stoneHit.z) < 0.05) return;
-  water.throwStone(stoneFrom, stoneHit);
-});
+for (const code of CONFIG.input.bindings.stone) {
+  input.onPress(code, () => {
+    if (!water.hasWater) return;
+    stoneRay.setFromCamera(new THREE.Vector2(0, 0), rig.camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -water.surface);
+    if (!stoneRay.ray.intersectPlane(plane, stoneHit)) return;
+    character.bones.handR.getWorldPosition(stoneFrom);
+    if (stoneFrom.distanceTo(stoneHit) > CONFIG.water.stone.range || terrain.waterDepthAt(stoneHit.x, stoneHit.z) < 0.05) return;
+    water.throwStone(stoneFrom, stoneHit);
+  });
+}
 
 // 點光源：每幀取離玩家最近的 MAX_LIGHTS 盞（窗光、火把），火把會閃爍
 const lightUniforms = materials.shared;
@@ -511,7 +673,7 @@ const collectDevInfo = () => ({
   readback: CONFIG.ascii.readback,
   gpu: gpuName,
   creatures: ((s) => `${s.total} total   ${s.active} active   ${s.visible} near   ${s.drawn} drawn   ${s.dead} dead   ${clock.label()}   ` + Object.entries(s.byState).map(([k, v]) => `${k} ${v}`).join(' '))(creatures.stats),
-  combat: ((s) => `hp ${Math.ceil(combat.player.hp)}   proj ${s.projectiles}   hazards ${s.hazards}   telegraphs ${s.telegraphs}   waves ${s.waves}   fires ${s.fires}   fx ${s.fx}   [T] +1h`)(combat.stats),
+  combat: ((s) => `hp ${Math.ceil(combat.player.hp)}   mp ${Math.floor(spells.state.mp)}   fireballs ${spells.stats.fireballs}   proj ${s.projectiles}   hazards ${s.hazards}   telegraphs ${s.telegraphs}   waves ${s.waves}   fires ${s.fires}   fx ${s.fx}   [T] +1h`)(combat.stats),
   debugView: CONFIG.render.debugView,
   player: { position: proxy.position, speed: proxy.speed, heading: proxy.heading },
   camera: { position: rig.camera.position, yaw: rig.yaw, pitch: rig.pitch, distance: rig.distance, fov: rig.camera.fov, scenic: rig.scenic },
@@ -604,6 +766,7 @@ function fixedUpdate(dt) {
   clock.update(dt);
   if (!showcase.enabled && !horseShow.enabled) {
     combat.fixedUpdate(dt, { lift: traveler.lift, riding });
+    spells.fixedUpdate(dt);
     const tc = profiler.now();
     creatures.fixedUpdate(dt);
     profiler.record('ai', tc);
@@ -683,6 +846,12 @@ function animate(alpha, frameDt) {
   } else {
     traveler.update(frameDt, time);
     actionPose(frameDt);
+    const alive = combat.player.alive;
+    rig.setAim(alive && input.isHeld(CONFIG.input.bindings.aim[0]));
+    const lockOn = spells.state.lock;
+    rig.track(lockOn && alive ? Math.atan2(proxy.position.x - lockOn.pos.x, proxy.position.z - lockOn.pos.z) : null);
+    const facingAim = traveler.mode === 'foot' && alive && (rig.aiming || lockOn || spells.state.castT < 0.5 || spells.state.pending || spells.channelKind);
+    proxy.facing = facingAim ? Math.atan2(aim.dirX, aim.dirZ) : null;
     hoofEffects.update(frameDt, proxy.position);
     weather.rain = CONFIG.weather.rain;
     water.update(frameDt, proxy.position, weather);
@@ -706,7 +875,34 @@ function animate(alpha, frameDt) {
     rig.camera.updateMatrixWorld();
     creatures.frame(alpha, frameDt, rig.camera, view.layout);
     combat.frameUpdate(frameDt);
-    hud.update(frameDt, { player: combat.player, cooldowns: combat.cooldowns, focus: creatures.focus, clock, camera: rig.camera, canvas });
+    updateAim();
+    spells.frame(frameDt, aim);
+    const st = spells.state;
+    const slots = { sword: { remaining: combat.cooldowns.sword, max: CONFIG.combat.sword.cooldown, afford: true }, roll: { remaining: st.roll.cooldown, max: SP.roll.cooldown, afford: true } };
+    for (const k of SPELL_KINDS) slots[k] = { remaining: st.cooldowns[k], max: SP[k].cooldown, afford: st.mp >= SP[k].cost };
+    hud.update(frameDt, {
+      player: combat.player,
+      mp: st.mp,
+      maxMp: SP.mp,
+      slots,
+      // 蓄力條：火球的蓄力、雷暴剩下的時間、地獄業火的蓄力
+      cast:
+        spells.charge >= 0
+          ? { label: '蓄力', k: spells.charge }
+          : spells.channelKind === 'storm'
+            ? { label: SP.storm.name, k: 1 - spells.channel, channel: true }
+            : spells.channelKind === 'hellfire'
+              ? { label: `${SP.hellfire.name} ${Math.max(0, SP.hellfire.charge * (1 - spells.channel)).toFixed(1)} 秒`, k: spells.channel, channel: true }
+              : null,
+      aiming: rig.aiming,
+      crosshair: !touchSkills.touch && (document.pointerLockElement === canvas || rig.aiming),
+      lock: st.lock,
+      focus: creatures.focus,
+      clock,
+      camera: rig.camera,
+      canvas,
+    });
+    touchSkills.update(slots);
     profiler.record('creatures', tc);
   }
   const root = character.object.position;
@@ -721,7 +917,7 @@ function animate(alpha, frameDt) {
     const onGround = traveler.mode === 'foot' || traveler.mode === 'riding';
     camTarget.copy(showcase.enabled || !onGround ? root : proxy.position);
     if (traveler.swimming) camTarget.y = root.y;
-    rig.update(frameDt, frameInput, camTarget, character.object.rotation.y, traveler.mode === 'foot' ? proxy.speed : horse.speed, showcase.enabled ? CONFIG.camera.pivotHeight : pivot, traveler.mode === 'foot' ? 1 : CONFIG.traveler.rideDistance);
+    rig.update(frameDt, frameInput, camTarget, character.object.rotation.y, traveler.mode === 'foot' ? proxy.speed : horse.speed, showcase.enabled ? CONFIG.camera.pivotHeight : pivot, (traveler.mode === 'foot' ? 1 : CONFIG.traveler.rideDistance) * (spells.channelKind === 'hellfire' ? 1 + 1.1 * spells.channel : 1));
   }
   updateOccluder();
   const key = CONFIG.traveler.interactKey.replace('Key', '');
@@ -838,4 +1034,4 @@ showLegend(
 );
 
 // 主控台除錯用
-window.__moonshade = { CONFIG, view, rig, proxy, physics, terrain, heightField, heightCheck, biomes, weather, ambience, loop, creatures, combat, clock, softBodies, cloak, horseHair, character, horse };
+window.__moonshade = { spells, input, traveler, CONFIG, view, rig, proxy, physics, terrain, heightField, heightCheck, biomes, weather, ambience, loop, creatures, combat, clock, softBodies, cloak, horseHair, character, horse };

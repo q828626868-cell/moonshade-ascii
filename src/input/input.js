@@ -6,6 +6,7 @@
 export function createInput(element, cfg) {
   const held = new Set();
   const pressHandlers = new Map();
+  const releaseHandlers = new Map();
   const gameKeys = new Set(Object.values(cfg.bindings).flat());
   const frame = { moveX: 0, moveY: 0, sprint: false, analog: false, lookX: 0, lookY: 0, zoom: 0 };
   let lookX = 0;
@@ -21,21 +22,44 @@ export function createInput(element, cfg) {
     const list = pressHandlers.get(code);
     if (list) for (const fn of list) fn();
   }
+  function emitRelease(code) {
+    const list = releaseHandlers.get(code);
+    if (list) for (const fn of list) fn();
+  }
+  // 放開按住的按鍵（視窗失焦時全部放開，蓄力中的法術不會卡住）
+  function releaseKey(code) {
+    if (held.delete(code)) emitRelease(code);
+  }
 
   window.addEventListener('keydown', (e) => {
     if (gameKeys.has(e.code)) e.preventDefault();
     if (!e.repeat) emit(e.code);
     held.add(e.code);
   });
-  window.addEventListener('keyup', (e) => held.delete(e.code));
+  window.addEventListener('keyup', (e) => releaseKey(e.code));
   window.addEventListener('blur', () => {
-    held.clear();
+    for (const code of [...held]) releaseKey(code);
     joystick = lookPointer = null;
     mouseDrag = false;
   });
 
+  // 滑鼠按鍵 → Mouse0（左）、Mouse2（右），和鍵盤共用按下／放開／按住的判斷。
+  // 用 mousedown 而不是 pointerdown：按住一個鍵時再按另一個，pointerdown 不會再觸發。
+  // 指標還沒鎖定時的第一下左鍵只用來鎖定滑鼠，不算攻擊
+  element.addEventListener('mousedown', (e) => {
+    if (e.button === 0 && cfg.pointerLock && document.pointerLockElement !== element) return;
+    const code = `Mouse${e.button}`;
+    if (held.has(code)) return;
+    held.add(code);
+    emit(code);
+  });
+  window.addEventListener('mouseup', (e) => releaseKey(`Mouse${e.button}`));
+
   element.addEventListener('pointerdown', (e) => {
-    element.setPointerCapture(e.pointerId);
+    // 滑鼠已經鎖定在畫面上時，瀏覽器不讓再捕捉指標（會丟 InvalidStateError），不影響操作
+    try {
+      element.setPointerCapture(e.pointerId);
+    } catch {}
     if (e.pointerType === 'mouse') {
       mouseDrag = true;
       if (cfg.pointerLock && document.pointerLockElement !== element) {
@@ -105,7 +129,7 @@ export function createInput(element, cfg) {
       const pressed = !!gp.buttons[index]?.pressed;
       if (pressed && !padPrev.get(index)) emit(code);
       if (pressed) held.add(code);
-      else if (padPrev.get(index)) held.delete(code);
+      else if (padPrev.get(index)) releaseKey(code);
       padPrev.set(index, pressed);
     }
     return padOut;
@@ -116,6 +140,11 @@ export function createInput(element, cfg) {
       if (!pressHandlers.has(code)) pressHandlers.set(code, []);
       pressHandlers.get(code).push(fn);
     },
+    onRelease(code, fn) {
+      if (!releaseHandlers.has(code)) releaseHandlers.set(code, []);
+      releaseHandlers.get(code).push(fn);
+    },
+    isHeld: (code) => held.has(code),
 
     sample() {
       const now = performance.now();

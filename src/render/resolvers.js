@@ -411,6 +411,7 @@ export function createResolvers(config, atlas, materialIds) {
   // 攻擊範圍預告：地上的紅色 !（shader 已抽掉一部分像素 → ! ! !），外框是連續的 !
   table.telegraph = glow('telegraph');
   table.telegraphEdge = glow('telegraphEdge', L - 2);
+  table.aimGuide = glow('aimGuide', L - 2); // 法術瞄準時地上的範圍
   // 石像守衛的符文：入夜甦醒時發光（白天的模型換成 golem 材質，見 species/golem.js）
   table.golemRune = glow('golemRune', L - 2);
   // 遊魂：字元隨時間閃爍（shader 也每 1/rate 秒換一組被抽掉的像素 → 半透明），暗處也看得到

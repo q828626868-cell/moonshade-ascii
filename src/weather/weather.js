@@ -26,6 +26,7 @@ export function createWeather(cfg, regionsCfg, clock = null, clockCfg = null) {
     // 目前的風（水平單位向量 × 強度）
     wind: { x: windDir.x, z: windDir.y, strength: cfg.wind.strength },
     snow: 0, // 0–1，降雪量
+    dim: 0, // 0–1：天色轉暗（雷暴，creatures/spells.js 設定）
     climate,
 
     // weights：玩家所在位置的區域權重（與 CONFIG.regions 同順序）
@@ -42,6 +43,8 @@ export function createWeather(cfg, regionsCfg, clock = null, clockCfg = null) {
       const day = clock ? clock.daylight : 0;
       weather.sun.intensity = cfg.sun.intensity * climate.sun * (1 + (clockCfg?.sun.intensity - 1 || 0) * day);
       weather.sky.intensity = cfg.sky.intensity * climate.sky * (1 + (clockCfg?.sun.sky - 1 || 0) * day);
+      weather.sun.intensity *= 1 - weather.dim;
+      weather.sky.intensity *= 1 - weather.dim * 0.8;
       if (clock) weather.sunDir.copy(moonDir).lerp(clock.sunDirection(sunDir), day).normalize();
       weather.ground.intensity = cfg.ground.intensity;
 

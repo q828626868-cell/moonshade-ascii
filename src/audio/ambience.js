@@ -19,6 +19,7 @@ export function createAmbience(cfg, regionsCfg) {
   const gains = {};
   let muted = !cfg.enabled;
   let nextBird = 0;
+  let hell = null; // 地獄業火蓄力的轟鳴（第一次用到時才建立）
 
   function noiseSource() {
     const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -169,6 +170,76 @@ export function createAmbience(cfg, regionsCfg) {
         o.start(t);
         o.stop(t + len + 0.02);
       }
+    },
+
+    // ---- 地獄業火（creatures/hellfire.js）----
+    // 蓄力的轟鳴：k = 0–1 越來越低沉、越來越大聲；k < 0 停止
+    hellCharge(k) {
+      if (!ctx) return;
+      if (!hell) {
+        if (k < 0) return;
+        const noiseLow = filter('lowpass', 90, 1.2);
+        const gNoise = ctx.createGain();
+        gNoise.gain.value = 0;
+        noiseSource().connect(noiseLow).connect(gNoise).connect(master);
+        const saw = ctx.createOscillator();
+        saw.type = 'sawtooth';
+        const sawLow = filter('lowpass', 160, 1);
+        const gSaw = ctx.createGain();
+        gSaw.gain.value = 0;
+        saw.connect(sawLow).connect(gSaw).connect(master);
+        saw.start();
+        hell = { noiseLow, gNoise, saw, gSaw };
+      }
+      const t = ctx.currentTime;
+      const on = k >= 0 ? k : 0;
+      hell.gNoise.gain.setTargetAtTime(on > 0 ? 0.25 + 0.9 * on : 0, t, k < 0 ? 0.15 : 0.3);
+      hell.noiseLow.frequency.setTargetAtTime(90 + 520 * on, t, 0.3);
+      hell.gSaw.gain.setTargetAtTime(on > 0 ? 0.12 + 0.35 * on : 0, t, k < 0 ? 0.15 : 0.3);
+      hell.saw.frequency.setTargetAtTime(32 + 46 * on, t, 0.3);
+    },
+    // 發射：一聲往下掉的呼嘯
+    hellLaunch() {
+      if (!ctx) return;
+      const t = ctx.currentTime;
+      const bp = filter('bandpass', 1400, 1.2);
+      bp.frequency.setValueAtTime(1400, t);
+      bp.frequency.exponentialRampToValueAtTime(160, t + 1.4);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.exponentialRampToValueAtTime(1.4, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+      noiseSource().connect(bp).connect(g).connect(master);
+      const o = ctx.createOscillator();
+      o.frequency.setValueAtTime(110, t);
+      o.frequency.exponentialRampToValueAtTime(38, t + 1.2);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.9, t);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 1.3);
+      o.connect(og).connect(master);
+      o.start(t);
+      o.stop(t + 1.4);
+    },
+    // 爆炸：低頻往下掉的重擊 + 長長的低沉轟隆；volume 0–1（離得越遠越小）
+    hellBoom(volume) {
+      if (!ctx) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(24, t + 1.6);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(1.6 * volume, t);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 2.6);
+      o.connect(og).connect(master);
+      o.start(t);
+      o.stop(t + 2.7);
+      const lp = filter('lowpass', 1200, 0.8);
+      lp.frequency.setValueAtTime(1200, t);
+      lp.frequency.exponentialRampToValueAtTime(90, t + 3.5);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(1.8 * volume, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 4.5);
+      noiseSource().connect(lp).connect(g).connect(master);
     },
 
     toggleMute() {

@@ -42,6 +42,10 @@ export function createDebugProxy(cfg, physics, terrain, materials) {
   let impact = 0; // 這一步正面撞上時的速度（m/s），沒有就是 0
   const axis = { x: 0, z: 0 };
   let knockX = 0; // 被野怪擊退的速度（m/s），指數衰減
+  let dashT = 0; // 翻滾：剩下的秒數與速度（期間不理輸入、沿這個方向前進）
+  let dashX = 0;
+  let dashZ = 0;
+  let facing = null; // 沒有移動輸入時轉向這個方向（瞄準、施法時面向準星；null = 不管）
   let knockZ = 0;
 
   const object = new THREE.Group();
@@ -83,6 +87,12 @@ export function createDebugProxy(cfg, physics, terrain, materials) {
       forward = Math.max(target, forward - rate * dt);
     }
 
+    if (!wish && facing !== null && !T.vehicle) heading = wrap(heading + clamp(wrap(facing - heading) * T.turnSharpness, -T.turnRate, T.turnRate) * dt);
+    if (dashT > 0) {
+      dashT -= dt;
+      forward = 0;
+      heading = Math.atan2(dashX, dashZ);
+    }
     let vx = Math.sin(heading) * forward;
     let vz = Math.cos(heading) * forward;
 
@@ -124,6 +134,10 @@ export function createDebugProxy(cfg, physics, terrain, materials) {
     vx += slideX;
     vz += slideZ;
     // 擊退：直接加在速度上，約 0.3 秒內衰減
+    if (dashT > 0) {
+      vx = dashX;
+      vz = dashZ;
+    }
     vx += knockX;
     vz += knockZ;
     const kd = Math.exp(-7 * dt);
@@ -183,6 +197,18 @@ export function createDebugProxy(cfg, physics, terrain, materials) {
     get tuning() {
       return tuning;
     },
+    // 翻滾：seconds 秒內以 (vx, vz) 前進（仍有碰撞）
+    dash(vx, vz, seconds) {
+      dashX = vx;
+      dashZ = vz;
+      dashT = seconds;
+    },
+    get dashing() {
+      return dashT > 0;
+    },
+    set facing(h) {
+      facing = h;
+    },
     // 擊退（野怪的攻擊）：加上一個往 (vx, vz) 的速度，很快衰減
     shove(vx, vz) {
       knockX += vx;
@@ -193,7 +219,7 @@ export function createDebugProxy(cfg, physics, terrain, materials) {
       prev.copy(pos);
       renderPos.copy(pos);
       heading = prevHeading = renderHeading = h;
-      forward = speed = brakeFrom = slideX = slideZ = impact = knockX = knockZ = 0;
+      forward = speed = brakeFrom = slideX = slideZ = impact = knockX = knockZ = dashT = 0;
       slipping = false;
       touch.active = false;
     },

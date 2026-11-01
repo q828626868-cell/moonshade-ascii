@@ -1,4 +1,4 @@
-// 戰鬥：玩家的血量與狀態（減速、被纏住、擊退、倒下）、玩家的劍與四種元素法術、
+// 戰鬥：玩家的血量與狀態（減速、被纏住、擊退、倒下）、玩家的劍（法術在 spells.js）、
 // 野怪的投射物（蛛網、酸液）、地上的危險區（蛛網、毒池）、震波、火（火堆、火球燒過的地面），以及這些的細線特效。
 // 攻擊範圍預告見 telegraph.js；野怪本身見 creatures.js。
 import * as THREE from 'three';
@@ -28,11 +28,12 @@ export function createCombat(cfg, deps) {
     downT: 0, // 倒下後的計時
     lift: 0, // 跳躍時離地的高度（震波）
     riding: false,
+    moveScale: 1, // 引導法術（雷暴）時的移動倍率（spells.js 設定）
     pos: proxy.simPosition,
     lastHit: null, // 最後打中玩家的野怪
   };
   const status = { speedScale: 1 }; // 給旅人控制器（entities/traveler.js）
-  const cooldowns = { sword: 0, fire: 0, thunder: 0, ice: 0, wind: 0 };
+  const cooldowns = { sword: 0 };
 
   // ---- 火：村裡的火把、野外的火堆、火球燒過的地面（狼不敢靠近；蛛網會燒掉）----
   const fires = []; // { x, z, radius, t（剩幾秒，Infinity = 一直燒）, mesh?, light? }
@@ -193,6 +194,18 @@ export function createCombat(cfg, deps) {
     fx.push({ kind: 'bolt', pts, t: 0, life: 0.35 });
     sparks(x, y + 0.2, z, 8, 'lightning', 5);
   }
+  // 兩點之間的鋸齒閃電（連鎖雷法的跳躍），0.25 秒
+  function arc(ax, ay, az, bx, by, bz) {
+    const pts = [];
+    const n = Math.max(3, Math.ceil(Math.hypot(bx - ax, by - ay, bz - az) / 0.8));
+    for (let i = 0; i <= n; i++) {
+      const k = i / n;
+      const j = i === 0 || i === n ? 0 : 0.35;
+      pts.push([ax + (bx - ax) * k + rng.range(-j, j), ay + (by - ay) * k + rng.range(-j, j), az + (bz - az) * k + rng.range(-j, j)]);
+    }
+    fx.push({ kind: 'bolt', pts, t: 0, life: 0.25 });
+  }
+
   // 從 (x, z) 往 heading 方向吹的風（幾條往前飛的短線）
   function gust(x, y, z, heading, spread, range, n = 14) {
     for (let i = 0; i < n; i++) {
@@ -214,78 +227,17 @@ export function createCombat(cfg, deps) {
     fx.push({ kind: 'arc', x, y, z, heading, radius, angle, t: 0, life: 0.2 });
   }
 
-  // ---- 玩家的攻擊 ----
-  // aim：{ x, z（鏡頭前方的水平方向）}；回傳是否施放
-  function aimTarget(range, aim) {
-    return creatures?.pickTarget(player.pos, aim.x, aim.z, range, cfg.aimCone) ?? null;
-  }
-  function chest() {
-    return new THREE.Vector3(player.pos.x, player.pos.y + (player.riding ? 2.3 : 1.3), player.pos.z);
-  }
+  // ---- 玩家的劍 ----
+  // aim：{ x, z（揮劍的水平方向）}
   function attack(kind, aim) {
-    if (!player.alive || cooldowns[kind] > 0 || !creatures) return false;
+    if (kind !== 'sword' || !player.alive || cooldowns.sword > 0 || !creatures) return false;
     const heading = Math.atan2(aim.x, aim.z);
-    if (kind === 'sword') {
-      const S = cfg.sword;
-      cooldowns.sword = S.cooldown;
-      const reach = S.range + (player.riding ? 0.8 : 0);
-      const hits = creatures.hitArea(player.pos, heading, { type: 'cone', radius: reach, angle: S.angle }, S.damage, 'physical', { knock: 2 });
-      swingArc(player.pos.x, player.pos.y + (player.riding ? 1.9 : 1.1), player.pos.z, heading, reach * 0.8, S.angle);
-      return hits >= 0;
-    }
-    const S = cfg.spells[kind];
-    cooldowns[kind] = S.cooldown;
-    hud?.cast(kind);
-    const target = aimTarget(S.range, aim);
-    const from = chest();
-    if (kind === 'fire' || kind === 'ice') {
-      const to = target ? target.aimPoint(new THREE.Vector3()) : from.clone().add(new THREE.Vector3(aim.x * S.range, -1.2, aim.z * S.range));
-      if (!target) to.y = Math.max(terrain.heightAt(to.x, to.z), to.y);
-      launch({
-        from,
-        to,
-        speed: S.speed,
-        arc: 0.3,
-        material: kind === 'fire' ? 'fireBolt' : 'iceShard',
-        size: kind === 'fire' ? 1.3 : 1,
-        owner: 'player',
-        homing: target,
-        trail: kind === 'fire' ? 'ember' : 'frost',
-        onLand(x, y, z) {
-          const n = creatures.hitArea({ x, z, y }, 0, { type: 'circle', radius: S.radius }, S.damage, S.element, { slow: S.slow, slowSeconds: S.slowSeconds, y });
-          sparks(x, y, z, 10, kind === 'fire' ? 'ember' : 'frost', 4);
-          if (kind === 'fire') {
-            burnWebs(x, z, S.radius + 0.5);
-            const ground = terrain.heightAt(x, z);
-            if (y - ground < 1.5 && terrain.waterDepthAt(x, z) < 0.05) addFire(x, z, S.burn, 1, true);
-          }
-          return n;
-        },
-      });
-      return true;
-    }
-    if (kind === 'thunder') {
-      let x, z, y;
-      if (target) {
-        const p = target.aimPoint(new THREE.Vector3());
-        x = p.x;
-        z = p.z;
-        y = target.pos.y;
-      } else {
-        x = player.pos.x + aim.x * 14;
-        z = player.pos.z + aim.z * 14;
-        y = terrain.heightAt(x, z);
-      }
-      bolt(x, y, z);
-      creatures.hitArea({ x, z, y }, 0, { type: 'circle', radius: S.radius }, S.damage, 'thunder', { y, vertical: true });
-      return true;
-    }
-    if (kind === 'wind') {
-      gust(player.pos.x, player.pos.y + 1, player.pos.z, heading, S.angle, S.range);
-      creatures.hitArea(player.pos, heading, { type: 'cone', radius: S.range, angle: S.angle }, S.damage, 'wind', { knock: S.knock });
-      return true;
-    }
-    return false;
+    const S = cfg.sword;
+    cooldowns.sword = S.cooldown;
+    const reach = S.range + (player.riding ? 0.8 : 0);
+    creatures.hitArea(player.pos, heading, { type: 'cone', radius: reach, angle: S.angle }, S.damage, 'physical', { knock: 2 });
+    swingArc(player.pos.x, player.pos.y + (player.riding ? 1.9 : 1.1), player.pos.z, heading, reach * 0.8, S.angle);
+    return true;
   }
 
   // ---- 每個固定步長 ----
@@ -337,7 +289,7 @@ export function createCombat(cfg, deps) {
     player.slowT = Math.max(0, player.slowT - dt);
     player.rootT = Math.max(0, player.rootT - dt);
     if (player.slowT <= 0) player.slow = 0;
-    status.speedScale = player.rootT > 0 ? 0 : (1 - Math.max(player.slow, webSlow));
+    status.speedScale = player.rootT > 0 ? 0 : (1 - Math.max(player.slow, webSlow)) * player.moveScale;
 
     // 投射物
     for (const p of [...projectiles]) {
@@ -512,8 +464,18 @@ export function createCombat(cfg, deps) {
     roots: spawnRoots,
     sparks,
     bolt,
+    arc,
     gust,
     frost,
+    get hud() {
+      return hud;
+    },
+    // 細線特效的樣式（spells.js 用）
+    lineStyle,
+    // 加一個細線特效（spells.js 用）：{ kind: 'spark' | 'bolt' | 'arc', ... }
+    effect(e) {
+      fx.push(e);
+    },
     attack,
     fixedUpdate,
     frameUpdate,

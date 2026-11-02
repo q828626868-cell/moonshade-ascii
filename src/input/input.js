@@ -17,6 +17,7 @@ export function createInput(element, cfg) {
   let lookPointer = null; // { id, x, y }
   const touches = new Map(); // 目前按著的觸控指標：pointerId → { x, y }
   let pinchDist = 0; // 雙指縮放上一幀的兩指距離（px）
+  let pinching = false; // 正在雙指縮放（兩指在畫面同一半邊時才算）
 
   function pointDistance() {
     const [a, b] = [...touches.values()];
@@ -48,6 +49,7 @@ export function createInput(element, cfg) {
     for (const code of [...held]) releaseKey(code);
     joystick = lookPointer = null;
     touches.clear();
+    pinching = false;
     mouseDrag = false;
   });
 
@@ -76,8 +78,14 @@ export function createInput(element, cfg) {
       return;
     }
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (touches.size === 2) {
+    // 第二根手指和第一根在畫面同一半邊才算雙指縮放；
+    // 一手在左半邊推搖桿、一手在右半邊轉視角是正常的操作，不能被當成縮放
+    const half = element.clientWidth / 2;
+    const firstId = [...touches.keys()].find((id) => id !== e.pointerId);
+    const firstLeft = joystick?.id === firstId ? true : lookPointer?.id === firstId ? false : touches.get(firstId)?.x < half;
+    if (touches.size === 2 && firstLeft === e.clientX < half) {
       // 兩根手指進入雙指縮放：先取消它們原本的搖桿或視角
+      pinching = true;
       for (const id of touches.keys()) {
         if (joystick?.id === id) joystick = null;
         if (lookPointer?.id === id) lookPointer = null;
@@ -101,7 +109,7 @@ export function createInput(element, cfg) {
       }
     } else if (touches.has(e.pointerId)) {
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (touches.size === 2) {
+      if (pinching && touches.size === 2) {
         // 張開為拉近、捏合為拉遠，與滾輪方向一致
         const d = pointDistance();
         zoom -= (d - pinchDist) * cfg.touch.pinchScale;
@@ -131,6 +139,7 @@ export function createInput(element, cfg) {
   const release = (e) => {
     if (e.pointerType === 'mouse') mouseDrag = false;
     touches.delete(e.pointerId);
+    if (touches.size < 2) pinching = false;
     if (joystick?.id === e.pointerId) joystick = null;
     if (lookPointer?.id === e.pointerId) lookPointer = null;
   };

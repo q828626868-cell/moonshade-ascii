@@ -19,3 +19,10 @@ node_modules
 wrangler.jsonc
 serve.ps1
 start.cmd
+
+# Android App（Capacitor）的專案檔：不屬於網站，不要上傳
+android
+node_modules
+package.json
+package-lock.json
+capacitor.config.json

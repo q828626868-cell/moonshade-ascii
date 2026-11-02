@@ -15,6 +15,13 @@ export function createInput(element, cfg) {
   let mouseDrag = false;
   let joystick = null; // { id, x0, y0, x, y }
   let lookPointer = null; // { id, x, y }
+  const touches = new Map(); // 目前按著的觸控指標：pointerId → { x, y }
+  let pinchDist = 0; // 雙指縮放上一幀的兩指距離（px）
+
+  function pointDistance() {
+    const [a, b] = [...touches.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
   const padPrev = new Map(); // 手把按鍵上一幀是否按著
   let lastSample = performance.now();
 
@@ -40,6 +47,7 @@ export function createInput(element, cfg) {
   window.addEventListener('blur', () => {
     for (const code of [...held]) releaseKey(code);
     joystick = lookPointer = null;
+    touches.clear();
     mouseDrag = false;
   });
 
@@ -67,6 +75,17 @@ export function createInput(element, cfg) {
       }
       return;
     }
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      // 兩根手指進入雙指縮放：先取消它們原本的搖桿或視角
+      for (const id of touches.keys()) {
+        if (joystick?.id === id) joystick = null;
+        if (lookPointer?.id === id) lookPointer = null;
+      }
+      pinchDist = pointDistance();
+      return;
+    }
+    if (touches.size > 2) return;
     if (e.clientX < element.clientWidth / 2 && !joystick) {
       joystick = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
     } else if (!lookPointer) {
@@ -79,6 +98,24 @@ export function createInput(element, cfg) {
       if (mouseDrag || document.pointerLockElement === element) {
         lookX += e.movementX;
         lookY += e.movementY;
+      }
+    } else if (touches.has(e.pointerId)) {
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        // 張開為拉近、捏合為拉遠，與滾輪方向一致
+        const d = pointDistance();
+        zoom -= (d - pinchDist) * cfg.touch.pinchScale;
+        pinchDist = d;
+        return;
+      }
+      if (joystick?.id === e.pointerId) {
+        joystick.x = e.clientX;
+        joystick.y = e.clientY;
+      } else if (lookPointer?.id === e.pointerId) {
+        lookX += (e.clientX - lookPointer.x) * cfg.touch.lookScale;
+        lookY += (e.clientY - lookPointer.y) * cfg.touch.lookScale;
+        lookPointer.x = e.clientX;
+        lookPointer.y = e.clientY;
       }
     } else if (joystick?.id === e.pointerId) {
       joystick.x = e.clientX;
@@ -93,6 +130,7 @@ export function createInput(element, cfg) {
 
   const release = (e) => {
     if (e.pointerType === 'mouse') mouseDrag = false;
+    touches.delete(e.pointerId);
     if (joystick?.id === e.pointerId) joystick = null;
     if (lookPointer?.id === e.pointerId) lookPointer = null;
   };

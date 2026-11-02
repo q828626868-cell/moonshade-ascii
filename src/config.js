@@ -1135,6 +1135,7 @@ export const CONFIG = {
       deadzone: 0.12,
       sprintBeyond: 1.3, // 搖桿推超過半徑的倍數即衝刺
       lookScale: 1.6,
+      pinchScale: 3, // 雙指縮放：兩指距離每變 1 px 對應的縮放量（與滾輪同單位）
     },
   },
 

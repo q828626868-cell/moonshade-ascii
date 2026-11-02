@@ -7,3 +7,16 @@
 !.dev.vars.example
 .env*
 !.env.example
+node_modules/
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+keystore.properties
+.env

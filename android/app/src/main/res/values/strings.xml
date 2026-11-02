@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">月影那地</string>
+    <string name="title_activity_main">月影那地</string>
+    <string name="package_name">com.moonshade.app</string>
+    <string name="custom_url_scheme">com.moonshade.app</string>
+</resources>

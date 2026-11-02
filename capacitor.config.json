@@ -1,0 +1,9 @@
+{
+  "appId": "com.moonshade.app",
+  "appName": "月影那地",
+  "webDir": "www",
+  "server": {
+    "url": "https://moonshade-ascii.a0961549050.workers.dev/",
+    "cleartext": false
+  }
+}
